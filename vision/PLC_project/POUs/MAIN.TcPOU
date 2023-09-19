@@ -1,0 +1,94 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="MAIN" Id="{42ce74aa-db60-4487-be42-784538fc2e2d}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+	hr							:	HRESULT;
+	fbCamera					:	FB_VN_FileSourceControl; //For cameras FB_VN_SimpleCameraControl instead
+	eState						:	ETcVnCameraState;
+	ipImageIn					:	ITcVnImage;
+	ipProcessedImage			:	ITcVnImage;
+	REFipProcessedImage  		: 	REFERENCE TO ITcVnImage;
+	ipImageInDisplay			:	ITcVnDisplayableImage;
+	ipProcessedImageToDisplay	:	ITcVnDisplayableImage;
+	nNewImageCounter			:   UINT;
+	
+	// Put text variables
+	text: STRING:='TEST';
+	x: UDINT:=100;
+	y: UDINT:=100;
+	scaleFont: LREAL:=1;
+	
+	
+	// Write image variables
+	fbWriteImage         :   FB_VN_WriteImage := (nTimeout := T#500MS); 
+	sFilePath            :   STRING(255) := '';
+	bWriteImageTrigger   :   BOOL;
+	bWriteImageWaitResult:   BOOL;
+	bWriteImageDone      :   BOOL;
+	nReturnCode          :   UDINT;
+
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[eState:=fbCamera.GetState();
+
+IF eState = TCVN_CS_ERROR THEN
+	hr:=fbCamera.Reset();
+	
+ELSIF eState<TCVN_CS_ACQUIRING THEN 
+	hr:=fbCamera.StartAcquisition();
+	
+ELSIF eState=TCVN_CS_ACQUIRING THEN 
+	hr:=fbCamera.GetCurrentImage(ipImageIn);
+	
+	IF SUCCEEDED(hr) AND ipImageIn<>0 THEN	
+		//Write label
+		REFipProcessedImage REF= ipProcessedImage;
+		F_VN_CopyImage(ipImageIn,REFipProcessedImage,hr);
+	
+		hr := F_VN_PutLabel(
+    		sText     		:=  text,
+    		ipDestImage     :=  ipProcessedImage,
+    		nX      		:=  x, 
+    		nY       		:=  y, 
+   			fFontScale  	:=  scaleFont,
+    		hrPrev          :=  hr
+		);
+		
+		IF NOT fbWriteImage.bBusy AND bWriteImageTrigger THEN
+        	bWriteImageTrigger := FALSE;
+        	bWriteImageDone := FALSE;
+       		bWriteImageWaitResult := TRUE;
+
+        	// With setting sFilePath:= '' to an empty string the images are saved under the default path
+        	// The default path can be set at the service configuration tab of the Vision Node
+        	// If sFilePath is set, it must contain the full path, image name and type
+        	// for example: sFilePath := 'C:\WriteImage\ImageName.bmp'
+        	fbWriteImage(ipImage := REFipProcessedImage, sFilePath := sFilePath, bWrite := TRUE);
+    	END_IF
+		
+		hr:=F_VN_TransformIntoDisplayableImage(ipImageIn,ipImageInDisplay,hr);
+		hr:=F_VN_TransformIntoDisplayableImage(ipProcessedImage,ipProcessedImageToDisplay,hr);
+	END_IF
+	
+END_IF
+
+
+fbWriteImage(sFilepath:= '', bWrite := FALSE);
+
+IF bWriteImageWaitResult AND NOT fbWriteImage.bBusy THEN
+    bWriteImageWaitResult := FALSE;
+    // Check if fbWriteImage was finished successfully or implement error handling
+    IF fbWriteImage.bError THEN
+        nReturnCode := fbWriteImage.nErrorId AND 16#FFF;
+    ELSE
+        bWriteImageDone := TRUE;
+        nReturnCode := 0;
+    END_IF
+END_IF
+
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
